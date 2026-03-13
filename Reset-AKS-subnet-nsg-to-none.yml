@@ -1,14 +1,12 @@
-# Pipeline: Remove NSG association from all subnets in a VNet
+# Pipeline: Remove NSG association from all subnets in a subscription
 # Sets subnet NSG to "None" (disassociates NSG)
 
 trigger: none
 
 variables:
   # Azure DevOps service connection name
-  azureServiceConnection: 'REPLACE_WITH_SERVICE_CONNECTION'
+  azureServiceConnection: 'Reset-NSG'
   subscriptionId: '6a3bb170-5159-4bff-860b-aa74fb762697'
-  resourceGroupName: 'aks-demo-2_rg'
-  vnetName: 'AKS-demo-2_RG-vnet'
 
 stages:
 - stage: Update
@@ -20,7 +18,7 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - task: AzureCLI@2
-      displayName: Disassociate NSG for all subnets
+      displayName: Disassociate NSG for all subnets in subscription
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
@@ -29,25 +27,61 @@ stages:
           set -euo pipefail
 
           az account set --subscription "$(subscriptionId)"
+          echo "Active subscription:"
+          az account show -o table
 
-          echo "Listing subnets in VNet: $(vnetName)"
-          mapfile -t SUBNETS < <(az network vnet subnet list \
-            --resource-group "$(resourceGroupName)" \
-            --vnet-name "$(vnetName)" \
-            --query "[].name" -o tsv)
+          echo "Listing VNets in subscription: $(subscriptionId)"
+          mapfile -t VNETS < <(az network vnet list \
+            --query "[].{name:name,rg:resourceGroup}" -o tsv)
 
-          if [ ${#SUBNETS[@]} -eq 0 ]; then
-            echo "No subnets found. Exiting."
+          if [ ${#VNETS[@]} -eq 0 ]; then
+            echo "No VNets found in subscription. Exiting."
             exit 0
           fi
 
-          for subnet in "${SUBNETS[@]}"; do
-            echo "Removing NSG from subnet: $subnet"
-            az network vnet subnet update \
-              --resource-group "$(resourceGroupName)" \
-              --vnet-name "$(vnetName)" \
-              --name "$subnet" \
-              --network-security-group ""
+          TOTAL=0
+          UPDATED=0
+          SKIPPED=0
+
+          for vnet in "${VNETS[@]}"; do
+            VNET_NAME="$(echo "$vnet" | awk '{print $1}')"
+            RG_NAME="$(echo "$vnet" | awk '{print $2}')"
+            echo "------------------------------------------------------------"
+            echo "VNet: $VNET_NAME (RG: $RG_NAME)"
+
+            mapfile -t SUBNETS < <(az network vnet subnet list \
+              --resource-group "$RG_NAME" \
+              --vnet-name "$VNET_NAME" \
+              --query "[].{name:name,id:id,nsg:networkSecurityGroup.id}" -o tsv)
+
+            if [ ${#SUBNETS[@]} -eq 0 ]; then
+              echo "No subnets found in this VNet."
+              continue
+            fi
+
+            for subnet in "${SUBNETS[@]}"; do
+              SUBNET_NAME="$(echo "$subnet" | awk '{print $1}')"
+              SUBNET_ID="$(echo "$subnet" | awk '{print $2}')"
+              SUBNET_NSG="$(echo "$subnet" | awk '{print $3}')"
+              TOTAL=$((TOTAL + 1))
+
+              if [ -z "$SUBNET_NSG" ] || [ "$SUBNET_NSG" = "None" ]; then
+                echo "Subnet: $SUBNET_NAME | NSG: none | action: skip"
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
+
+              echo "Subnet: $SUBNET_NAME | NSG: $SUBNET_NSG | action: remove"
+              az network vnet subnet update \
+                --ids "$SUBNET_ID" \
+                --network-security-group ""
+              UPDATED=$((UPDATED + 1))
+            done
           done
 
+          echo "------------------------------------------------------------"
+          echo "Summary"
+          echo "Total subnets scanned: $TOTAL"
+          echo "NSG removed: $UPDATED"
+          echo "Already none: $SKIPPED"
           echo "Done."
