@@ -4,14 +4,20 @@
 trigger: none
 
 schedules:
-- cron: "*/15 15-23 * * *"
-  displayName: "Every 15 min (09:00-17:45 MDT)"
+- cron: "*/10 15-23 * * *"
+  displayName: "Every 10 min (09:00-17:50 MDT)"
   branches:
     include:
     - main
   always: true
-- cron: "*/15 0-5 * * *"
-  displayName: "Every 15 min (18:00-23:45 MDT)"
+- cron: "*/10 0-4 * * *"
+  displayName: "Every 10 min (18:00-22:50 MDT)"
+  branches:
+    include:
+    - main
+  always: true
+- cron: "0 5 * * *"
+  displayName: "Once at 23:00 MDT"
   branches:
     include:
     - main
