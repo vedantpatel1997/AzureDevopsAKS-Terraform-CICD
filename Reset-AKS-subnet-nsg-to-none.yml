@@ -37,6 +37,7 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - checkout: none
     - task: AzureCLI@2
       displayName: Disassociate NSG for all subnets in subscription
       inputs:
