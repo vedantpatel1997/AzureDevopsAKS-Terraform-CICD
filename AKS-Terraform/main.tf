@@ -22,9 +22,7 @@ terraform {
     storage_account_name = "strgterraformvp"
     container_name       = "tfstatefiles"
     # Backend blocks cannot use input variables. Keep the shared container
-    # static and pass an environment-specific AKS state key during init, for example:
-    # ./Initialize-AksTerraformBackend.ps1 -Environment dev
-    # ./Initialize-AksTerraformBackend.ps1 -Environment prod
+    
   }
 }
 
