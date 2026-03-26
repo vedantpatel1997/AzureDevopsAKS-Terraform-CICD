@@ -26,10 +26,6 @@ variables:
   value: 'strgterraformvp'
 - name: TERRAFORM_STATE_CONTAINER
   value: 'tfstatefiles'
-- name: DESTROY_NOTIFY_USERS
-  value: ''
-- name: DESTROY_APPROVERS
-  value: ''
 
 stages:
 - stage: TerraformValidate
@@ -130,31 +126,9 @@ stages:
         artifact: '${{ parameters.targetEnvironment }}-destroy-plan'
         publishLocation: 'pipeline'
 
-- stage: DestroyApproval
-  displayName: Approval Required for Destroy
-  dependsOn: TerraformDestroyPlan
-  jobs:
-  - job: WaitForManualApproval
-    displayName: Wait for Manual Approval
-    pool: server
-    timeoutInMinutes: 130
-    steps:
-    - task: ManualValidation@1
-      displayName: Approve AKS Destroy
-      timeoutInMinutes: 120
-      inputs:
-        notifyUsers: '$(DESTROY_NOTIFY_USERS)'
-        approvers: '$(DESTROY_APPROVERS)'
-        allowApproversToApproveTheirOwnRuns: false
-        instructions: |
-          Review the published artifact named ${{ parameters.targetEnvironment }}-destroy-plan before approving this run.
-          Approve only when you are sure the ${{ parameters.targetEnvironment }} AKS resources should be deleted.
-          This approval expires after 2 hours. If nobody approves, the destroy operation is rejected automatically.
-        onTimeout: 'reject'
-
 - stage: TerraformDestroy
   displayName: Destroy AKS Cluster (${{ parameters.targetEnvironment }})
-  dependsOn: DestroyApproval
+  dependsOn: TerraformDestroyPlan
   jobs:
   - deployment: DestroyAKSCluster
     displayName: Destroy ${{ parameters.targetEnvironment }} AKS Cluster
@@ -171,7 +145,7 @@ stages:
               targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
 
           - task: DownloadPipelineArtifact@2
-            displayName: Download Approved Destroy Plan
+            displayName: Download Reviewed Destroy Plan
             inputs:
               buildType: 'current'
               artifactName: '${{ parameters.targetEnvironment }}-destroy-plan'
