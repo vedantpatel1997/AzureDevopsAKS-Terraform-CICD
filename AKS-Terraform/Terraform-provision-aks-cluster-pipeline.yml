@@ -1,5 +1,10 @@
 trigger:
-  - main
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - AKS-Terraform/Terraform-manifests/**
 
 pool:
   vmImage: 'ubuntu-latest'

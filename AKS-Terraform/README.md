@@ -148,11 +148,12 @@ Before creating pipelines:
 
 1. Confirm the repo contains the `AKS-Terraform` folder.
 2. Confirm the branch used for automatic deployments is `main`.
-3. Confirm both YAML files exist in that branch.
+3. Confirm the automatic trigger should watch only the `AKS-Terraform/Terraform-manifests/` folder.
+4. Confirm both YAML files exist in that branch.
 
 Why this matters:
 
-- the provision pipeline uses `trigger: main`
+- the provision pipeline uses `main` plus a path filter for `AKS-Terraform/Terraform-manifests/**`
 - if your working branch strategy is different, update the YAML trigger before relying on auto-runs
 
 ### Step 2: Install the Terraform Azure DevOps extension if needed
@@ -301,7 +302,7 @@ What this means in practice:
 
 What happens after creation:
 
-- pushes to `main` can trigger it automatically
+- changes pushed to `main` under `AKS-Terraform/Terraform-manifests/` can trigger it automatically
 - after Terraform validation, the dev, qa, and prod plan stages can run in parallel
 - each environment then waits on its own approval before apply
 
@@ -341,9 +342,9 @@ If a run pauses because of resource authorization:
 
 The provision pipeline has:
 
-- `trigger: main`
+- a `main` branch trigger with a path filter for `AKS-Terraform/Terraform-manifests/**`
 
-So a push to `main` can start the pipeline automatically.
+So a push to `main` starts the pipeline automatically only when files under `AKS-Terraform/Terraform-manifests/` change.
 
 ### Manual use
 
