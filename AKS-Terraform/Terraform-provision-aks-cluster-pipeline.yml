@@ -5,6 +5,8 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
+- name: DEV_ENVIRONMENT
+  value: dev
 - name: QA_ENVIRONMENT
   value: qa
 - name: PROD_ENVIRONMENT
@@ -54,7 +56,7 @@ stages:
         backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
         backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
         backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
-        backendAzureRmKey: 'aks-$(QA_ENVIRONMENT).tfstate'
+        backendAzureRmKey: 'aks-$(DEV_ENVIRONMENT).tfstate'
 
     - task: TerraformTask@5
       displayName: Terraform Validate
@@ -62,6 +64,133 @@ stages:
         provider: 'azurerm'
         command: 'validate'
         workingDirectory: '$(TERRAFORM_MANIFESTS_SOURCE_DIR)'
+
+- stage: TerraformDevPlan
+  displayName: Create Dev Plan
+  dependsOn: TerraformValidate
+  jobs:
+  - job: TerraformDevPlanJob
+    displayName: Generate Dev Terraform Plan
+    steps:
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Terraform Manifests
+      inputs:
+        buildType: 'current'
+        artifactName: 'Terraform-manifests-out'
+        targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+
+    - task: DownloadSecureFile@1
+      displayName: Download SSH Public Key
+      name: sshkey
+      inputs:
+        secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
+
+    - script: |
+        mkdir -p "$(Pipeline.Workspace)/secure-files"
+        cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
+      displayName: Stage SSH Public Key
+
+    - task: TerraformInstaller@1
+      displayName: Install Terraform
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTask@5
+      displayName: Terraform Init
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+        backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
+        backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
+        backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
+        backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
+        backendAzureRmKey: 'aks-$(DEV_ENVIRONMENT).tfstate'
+
+    - task: TerraformTask@5
+      displayName: Terraform Plan Dev
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+        commandOptions: '-var ssh_public_key=$(SSH_PUBLIC_KEY_FILE) -var environment=$(DEV_ENVIRONMENT) -out $(TERRAFORM_MANIFESTS_WORK_DIR)/$(DEV_ENVIRONMENT)-$(Build.BuildId).tfplan'
+        environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
+
+    - script: |
+        mkdir -p "$(Pipeline.Workspace)/dev-plan-bundle"
+        terraform show -no-color "$(TERRAFORM_MANIFESTS_WORK_DIR)/$(DEV_ENVIRONMENT)-$(Build.BuildId).tfplan" > "$(Pipeline.Workspace)/dev-plan-bundle/$(DEV_ENVIRONMENT)-$(Build.BuildId).txt"
+        cp "$(TERRAFORM_MANIFESTS_WORK_DIR)/$(DEV_ENVIRONMENT)-$(Build.BuildId).tfplan" "$(Pipeline.Workspace)/dev-plan-bundle/$(DEV_ENVIRONMENT)-$(Build.BuildId).tfplan"
+      displayName: Prepare Dev Plan Bundle
+      workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Dev Plan Bundle
+      inputs:
+        targetPath: '$(Pipeline.Workspace)/dev-plan-bundle'
+        artifact: 'dev-plan'
+        publishLocation: 'pipeline'
+
+- stage: DeployDevAKSCluster
+  displayName: Apply Dev Plan
+  dependsOn: TerraformDevPlan
+  jobs:
+  - deployment: ApplyDevAKSCluster
+    displayName: Apply Dev AKS Cluster
+    environment: $(DEV_ENVIRONMENT)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Terraform Manifests
+            inputs:
+              buildType: 'current'
+              artifactName: 'Terraform-manifests-out'
+              targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Reviewed Dev Plan
+            inputs:
+              buildType: 'current'
+              artifactName: 'dev-plan'
+              targetPath: '$(Pipeline.Workspace)/dev-plan-bundle'
+
+          - task: DownloadSecureFile@1
+            displayName: Download SSH Public Key
+            name: sshkey
+            inputs:
+              secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
+
+          - script: |
+              mkdir -p "$(Pipeline.Workspace)/secure-files"
+              cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
+            displayName: Stage SSH Public Key
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: TerraformTask@5
+            displayName: Terraform Init
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+              backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
+              backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
+              backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
+              backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
+              backendAzureRmKey: 'aks-$(DEV_ENVIRONMENT).tfstate'
+
+          - task: TerraformTask@5
+            displayName: Terraform Apply Dev Plan
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+              commandOptions: '$(Pipeline.Workspace)/dev-plan-bundle/$(DEV_ENVIRONMENT)-$(Build.BuildId).tfplan'
+              environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
 
 - stage: TerraformQaPlan
   displayName: Create QA Plan
@@ -192,7 +321,7 @@ stages:
 
 - stage: TerraformProdPlan
   displayName: Create Prod Plan
-  dependsOn: DeployQaAKSCluster
+  dependsOn: TerraformValidate
   jobs:
   - job: TerraformProdPlanJob
     displayName: Generate Prod Terraform Plan

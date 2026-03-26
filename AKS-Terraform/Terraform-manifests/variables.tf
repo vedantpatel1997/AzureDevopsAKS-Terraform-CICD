@@ -7,12 +7,12 @@ variable "location" {
 
 variable "environment" {
   type        = string
-  description = "Short environment name used in resource naming, AKS node pool naming, and tagging. Supported values are qa and prod."
-  default     = "qa"
+  description = "Short environment name used in resource naming, AKS node pool naming, and tagging. Supported values are dev, qa, and prod."
+  default     = "dev"
 
   validation {
-    condition     = contains(["qa", "prod"], var.environment)
-    error_message = "environment must be either qa or prod."
+    condition     = contains(["dev", "qa", "prod"], var.environment)
+    error_message = "environment must be one of dev, qa, or prod."
   }
 }
 

@@ -6,40 +6,18 @@ This guide is written for beginners and matches the current pipeline design in t
 
 ## Current design at a glance
 
-This project now uses only two reusable Azure DevOps Environments:
+This project now uses three reusable Azure DevOps Environments:
 
+- `dev`
 - `qa`
 - `prod`
 
-Those same two environment objects are reused by:
+Those same three environment objects are reused by:
 
 - the provision pipeline when it applies Terraform changes
 - the destroy pipeline when it applies Terraform destroy plans
 
-This design keeps the approval model simple and works well when the same approvers should review both apply and destroy actions for a given environment.
-
-Tradeoff:
-
-- If you later decide destroy operations need stricter approvals than provision operations, split the environments again.
-
-## Important migration note
-
-This repo previously used `dev` and `qa` style naming in the pipelines. The current pipeline model is `qa` and `prod`.
-
-That means the pipelines now use these Terraform state files:
-
-- `aks-qa.tfstate`
-- `aks-prod.tfstate`
-
-If you already have a live environment managed by `aks-dev.tfstate`, the new pipelines will not automatically rename that state to prod.
-
-In plain language:
-
-- changing the pipeline from `dev` to `prod` changes the Terraform environment value
-- that changes resource names
-- that also changes the backend state key from `aks-dev.tfstate` to `aks-prod.tfstate`
-
-If your old `dev` environment should become the new `prod` environment, plan a Terraform state migration before using the new prod pipeline in a live subscription.
+Approvals are designed to happen after the Terraform plan stage, not before it. That lets approvers review the generated plan artifact before deciding.
 
 ## Active pipeline files
 
@@ -68,17 +46,20 @@ File:
 Flow:
 
 1. Validate Terraform.
-2. Create the QA plan.
-3. Wait for approval on the reusable `qa` environment.
-4. Apply the approved QA plan.
-5. Create the prod plan.
-6. Wait for approval on the reusable `prod` environment.
-7. Apply the approved prod plan.
+2. Create the dev plan.
+3. Create the QA plan.
+4. Create the prod plan.
+5. Wait for approval on the reusable `dev` environment.
+6. Apply the approved dev plan.
+7. Wait for approval on the reusable `qa` environment.
+8. Apply the approved QA plan.
+9. Wait for approval on the reusable `prod` environment.
+10. Apply the approved prod plan.
 
 Why this is a good practice:
 
 - approvers review the Terraform plan before apply starts
-- prod is promoted only after qa succeeds
+- `dev`, `qa`, and `prod` can run in parallel after validation
 - the exact reviewed plan file is what gets applied
 
 ### Destroy pipeline
@@ -89,7 +70,7 @@ File:
 
 Flow:
 
-1. Choose `qa` or `prod` when you start the run.
+1. Choose `dev`, `qa`, or `prod` when you start the run.
 2. Validate Terraform.
 3. Create a destroy plan for the selected environment.
 4. Wait for approval on the same reusable environment object.
@@ -107,8 +88,9 @@ These names are currently hard-coded in the YAML files. If you change them in Az
 
 ### Azure DevOps names
 
-- Environment 1: `qa`
-- Environment 2: `prod`
+- Environment 1: `dev`
+- Environment 2: `qa`
+- Environment 3: `prod`
 - Secure file: `aks-terraform-devops-ssh-key-ubuntu.pub`
 - Service connection: `terraform-aks-azurerm-svc-con`
 
@@ -120,6 +102,7 @@ These names are currently hard-coded in the YAML files. If you change them in Az
 
 ### Terraform state files
 
+- `aks-dev.tfstate`
 - `aks-qa.tfstate`
 - `aks-prod.tfstate`
 
@@ -148,12 +131,13 @@ Set up the project in this order:
 3. Create the Azure Resource Manager service connection.
 4. Confirm the service connection has Azure permissions.
 5. Upload the SSH public key as a Secure File.
-6. Create the reusable environments `qa` and `prod`.
-7. Add approval checks to `qa` and `prod`.
+6. Create the reusable environments `dev`, `qa`, and `prod`.
+7. Add approval checks to `dev`, `qa`, and `prod`.
 8. Create the provision pipeline.
 9. Create the destroy pipeline.
-10. Run a QA test first.
-11. Use prod only after QA is working and approvals are confirmed.
+10. Run a dev test first.
+11. Use QA after dev is working.
+12. Use prod only after dev and QA are working and approvals are confirmed.
 
 ## Step-by-step Azure DevOps setup
 
@@ -247,8 +231,9 @@ Important:
 
 ### Step 6: Create the reusable Azure DevOps Environments
 
-Create only these two environments:
+Create these three environments:
 
+- `dev`
 - `qa`
 - `prod`
 
@@ -257,13 +242,16 @@ How:
 1. Open `Pipelines`.
 2. Open `Environments`.
 3. Select `New environment`.
-4. Create `qa`.
-5. Create `prod`.
+4. Create `dev`.
+5. Create `qa`.
+6. Create `prod`.
 
 How they are reused:
 
-- provision apply for QA uses `qa`
-- destroy apply for QA uses `qa`
+- provision apply for dev uses `dev`
+- destroy apply for dev uses `dev`
+- provision apply for qa uses `qa`
+- destroy apply for qa uses `qa`
 - provision apply for prod uses `prod`
 - destroy apply for prod uses `prod`
 
@@ -273,6 +261,7 @@ This is the key part of the approval model.
 
 Add approval checks to:
 
+- `dev`
 - `qa`
 - `prod`
 
@@ -280,18 +269,21 @@ How:
 
 1. Open `Pipelines`.
 2. Open `Environments`.
-3. Select `qa`.
+3. Select `dev`.
 4. Open `Approvals and checks`.
 5. Add an `Approval` check.
 6. Choose the approvers or approval group.
 7. Set the timeout to `120 minutes`.
 8. Save the check.
-9. Repeat the same steps for `prod`.
+9. Repeat the same steps for `qa`.
+10. Repeat the same steps for `prod`.
 
 What this means in practice:
 
-- QA apply pauses after the QA plan is created
+- dev apply pauses after the dev plan is created
+- qa apply pauses after the qa plan is created
 - prod apply pauses after the prod plan is created
+- dev, qa, and prod can progress independently after validation
 - destroy also pauses after the destroy plan is created
 - the same environment approval policy is reused for both pipeline types
 
@@ -308,8 +300,8 @@ What this means in practice:
 What happens after creation:
 
 - pushes to `main` can trigger it automatically
-- the run will create a QA plan first
-- after QA approval and apply, it will create the prod plan
+- after Terraform validation, the dev, qa, and prod plan stages can run in parallel
+- each environment then waits on its own approval before apply
 
 ### Step 9: Create the destroy pipeline
 
@@ -324,7 +316,7 @@ What happens after creation:
 What happens after creation:
 
 - it does not auto-run from Git pushes
-- you run it manually only when you want to destroy `qa` or `prod`
+- you run it manually only when you want to destroy `dev`, `qa`, or `prod`
 
 ### Step 10: Authorize protected resources on first use
 
@@ -371,45 +363,62 @@ This stage:
 - runs `terraform init`
 - runs `terraform validate`
 
-#### Stage 2: TerraformQaPlan
+#### Stage 2: TerraformDevPlan
 
 This stage:
 
 - downloads the Terraform artifact
 - downloads the SSH public key
-- initializes Terraform with `aks-qa.tfstate`
-- runs the QA plan
-- publishes a QA plan bundle with the `.tfplan` file and a readable `.txt` summary
+- initializes Terraform with `aks-dev.tfstate`
+- runs the dev plan
+- publishes a dev plan bundle with the `.tfplan` file and a readable `.txt` summary
 
-#### Stage 3: DeployQaAKSCluster
+#### Stage 3: DeployDevAKSCluster
+
+This stage:
+
+- waits for the `dev` environment approval
+- applies the exact reviewed dev plan
+
+#### Stage 4: TerraformQaPlan
+
+This stage:
+
+- initializes Terraform with `aks-qa.tfstate`
+- runs the qa plan
+- publishes a qa plan bundle
+
+#### Stage 5: DeployQaAKSCluster
 
 This stage:
 
 - waits for the `qa` environment approval
-- applies the exact reviewed QA plan
+- applies the exact reviewed qa plan
 
-#### Stage 4: TerraformProdPlan
+#### Stage 6: TerraformProdPlan
 
-This stage starts only after QA apply succeeds.
-
-It:
+This stage:
 
 - initializes Terraform with `aks-prod.tfstate`
 - runs the prod plan
 - publishes a prod plan bundle
 
-#### Stage 5: DeployProdAKSCluster
+#### Stage 7: DeployProdAKSCluster
 
 This stage:
 
 - waits for the `prod` environment approval
 - applies the exact reviewed prod plan
 
+Note:
+
+- the dev, qa, and prod tracks run independently after the shared validation stage
+
 ## How to use the destroy pipeline
 
 ### When to use it
 
-Use the destroy pipeline only when you intentionally want to delete the QA or prod AKS environment.
+Use the destroy pipeline only when you intentionally want to delete the dev, QA, or prod AKS environment.
 
 Do not use it for normal updates.
 
@@ -418,6 +427,7 @@ Do not use it for normal updates.
 1. Open `AKS Terraform Destroy`.
 2. Select `Run pipeline`.
 3. Choose `targetEnvironment`:
+   - `dev`
    - `qa`
    - `prod`
 4. Confirm the branch.
@@ -443,7 +453,7 @@ This stage:
 
 This stage:
 
-- waits for approval on `qa` or `prod`
+- waits for approval on `dev`, `qa`, or `prod`
 - downloads the reviewed destroy plan
 - applies that exact destroy plan
 
@@ -459,8 +469,10 @@ Before approving either provision or destroy:
 
 Artifact names you will see:
 
+- `dev-plan`
 - `qa-plan`
 - `prod-plan`
+- `dev-destroy-plan`
 - `qa-destroy-plan`
 - `prod-destroy-plan`
 
@@ -472,8 +484,8 @@ You are ready when all of these are true:
 - the service connection `terraform-aks-azurerm-svc-con` exists
 - the secure file `aks-terraform-devops-ssh-key-ubuntu.pub` exists
 - the Terraform backend storage exists and is reachable
-- the reusable environments `qa` and `prod` exist
-- the `qa` and `prod` environments have approval checks
+- the reusable environments `dev`, `qa`, and `prod` exist
+- the `dev`, `qa`, and `prod` environments have approval checks
 - the provision pipeline exists
 - the destroy pipeline exists
 
@@ -523,35 +535,23 @@ Fix:
 
 Possible causes:
 
-- the `qa` or `prod` environment does not exist
+- the `dev`, `qa`, or `prod` environment does not exist
 - the environment exists but has no approval check
 - the approval check is configured on the wrong environment
 
 Fix:
 
 1. Open `Pipelines` -> `Environments`.
-2. Confirm `qa` and `prod` exist.
-3. Confirm both have an `Approval` check.
-4. Confirm the deployment jobs in the YAML point to `qa` and `prod`.
-
-### Problem: Provision pipeline no longer manages the old dev environment
-
-Cause:
-
-- the pipeline now targets `qa` and `prod`
-- the old `dev` state key is no longer used by the pipeline
-
-Fix:
-
-- decide whether `dev` should be retired or migrated into `prod`
-- if it should become `prod`, migrate the Terraform state before relying on the new prod workflow
+2. Confirm `dev`, `qa`, and `prod` exist.
+3. Confirm all three have an `Approval` check.
+4. Confirm the deployment jobs in the YAML point to `dev`, `qa`, and `prod`.
 
 ## Safe operating recommendations
 
-- test QA first before using prod
+- test dev first before promoting to qa
+- test qa before using prod
 - keep the `prod` approvers limited to a small trusted group
 - review every plan artifact before approval
-- do not treat renaming `dev` to `prod` as a simple label change; it is a state and naming change
 
 ## Quick summary
 
@@ -560,8 +560,8 @@ If you want the shortest setup checklist:
 1. Install the Terraform extension if Azure DevOps does not recognize the Terraform tasks.
 2. Create the service connection `terraform-aks-azurerm-svc-con`.
 3. Upload the secure file `aks-terraform-devops-ssh-key-ubuntu.pub`.
-4. Create only two reusable environments: `qa` and `prod`.
-5. Add approval checks with a 120-minute timeout to both `qa` and `prod`.
+4. Create three reusable environments: `dev`, `qa`, and `prod`.
+5. Add approval checks with a 120-minute timeout to `dev`, `qa`, and `prod`.
 6. Create the provision pipeline from `AKS-Terraform/Terraform-provision-aks-cluster-pipeline.yml`.
 7. Create the destroy pipeline from `AKS-Terraform/Terraform-destroy-aks-cluster-pipeline.yml`.
 8. Review plan artifacts before every approval.

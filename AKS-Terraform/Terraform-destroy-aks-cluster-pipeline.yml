@@ -8,8 +8,9 @@ parameters:
 - name: targetEnvironment
   displayName: Target environment to destroy
   type: string
-  default: qa
+  default: dev
   values:
+  - dev
   - qa
   - prod
 
