@@ -70,17 +70,18 @@ File:
 
 Flow:
 
-1. Choose `dev`, `qa`, or `prod` when you start the run.
+1. Choose one or more of `dev`, `qa`, or `prod` when you start the run.
 2. Validate Terraform.
-3. Create a destroy plan for the selected environment.
-4. Wait for approval on the same reusable environment object.
-5. Apply the reviewed destroy plan.
+3. Create a destroy plan for each selected environment.
+4. Wait for approval on the same reusable environment object for each selected environment.
+5. Apply the reviewed destroy plan for each approved environment.
 
 Why this is a good practice:
 
 - destroy approval also happens after the plan is visible
 - the approver can review the `.txt` plan summary before approving
 - the pipeline applies the exact reviewed destroy plan
+- multiple selected destroy targets can run in parallel after validation
 
 ## Names this project expects
 
@@ -284,7 +285,8 @@ What this means in practice:
 - qa apply pauses after the qa plan is created
 - prod apply pauses after the prod plan is created
 - dev, qa, and prod can progress independently after validation
-- destroy also pauses after the destroy plan is created
+- destroy also pauses after each selected destroy plan is created
+- selected destroy environments can progress independently after validation
 - the same environment approval policy is reused for both pipeline types
 
 ### Step 8: Create the provision pipeline
@@ -316,7 +318,7 @@ What happens after creation:
 What happens after creation:
 
 - it does not auto-run from Git pushes
-- you run it manually only when you want to destroy `dev`, `qa`, or `prod`
+- you run it manually only when you want to destroy one or more of `dev`, `qa`, or `prod`
 
 ### Step 10: Authorize protected resources on first use
 
@@ -426,12 +428,13 @@ Do not use it for normal updates.
 
 1. Open `AKS Terraform Destroy`.
 2. Select `Run pipeline`.
-3. Choose `targetEnvironment`:
+3. Choose `targetEnvironments`.
+4. Select one or more values:
    - `dev`
    - `qa`
    - `prod`
-4. Confirm the branch.
-5. Start the run.
+5. Confirm the branch.
+6. Start the run.
 
 ### What each stage means
 
@@ -439,23 +442,28 @@ Do not use it for normal updates.
 
 Checks the Terraform code before any destroy action begins.
 
-#### Stage 2: TerraformDestroyPlan
+#### Stage 2: TerraformDestroyPlan_<environment>
 
 This stage:
 
 - downloads the Terraform artifact
 - downloads the SSH public key
-- initializes Terraform against the selected state file
+- initializes Terraform against that environment's state file
 - runs `terraform plan -destroy`
 - publishes a destroy plan bundle with the binary plan and readable summary
 
-#### Stage 3: TerraformDestroy
+#### Stage 3: TerraformDestroy_<environment>
 
 This stage:
 
-- waits for approval on `dev`, `qa`, or `prod`
+- waits for approval on the matching reusable environment such as `dev`, `qa`, or `prod`
 - downloads the reviewed destroy plan
 - applies that exact destroy plan
+
+Note:
+
+- each selected environment gets its own plan stage and its own destroy stage
+- selected destroy tracks can run in parallel after the shared validation stage
 
 ## What approvers should review
 

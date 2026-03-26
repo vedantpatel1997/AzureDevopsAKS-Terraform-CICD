@@ -5,10 +5,11 @@ pool:
   vmImage: 'ubuntu-latest'
 
 parameters:
-- name: targetEnvironment
-  displayName: Target environment to destroy
-  type: string
-  default: dev
+- name: targetEnvironments
+  displayName: Target environments to destroy
+  type: stringList
+  default:
+  - dev
   values:
   - dev
   - qa
@@ -60,7 +61,7 @@ stages:
         backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
         backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
         backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
-        backendAzureRmKey: 'aks-${{ parameters.targetEnvironment }}.tfstate'
+        backendAzureRmKey: 'aks-dev.tfstate'
 
     - task: TerraformTask@5
       displayName: Terraform Validate
@@ -69,129 +70,130 @@ stages:
         command: 'validate'
         workingDirectory: '$(TERRAFORM_MANIFESTS_SOURCE_DIR)'
 
-- stage: TerraformDestroyPlan
-  displayName: Create Destroy Plan (${{ parameters.targetEnvironment }})
-  dependsOn: TerraformValidate
-  jobs:
-  - job: TerraformDestroyPlanJob
-    displayName: Generate Terraform Destroy Plan
-    steps:
-    - task: DownloadPipelineArtifact@2
-      displayName: Download Terraform Manifests
-      inputs:
-        buildType: 'current'
-        artifactName: 'Terraform-manifests-out'
-        targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+- ${{ each environmentName in parameters.targetEnvironments }}:
+  - stage: TerraformDestroyPlan_${{ environmentName }}
+    displayName: Create Destroy Plan (${{ environmentName }})
+    dependsOn: TerraformValidate
+    jobs:
+    - job: TerraformDestroyPlanJob_${{ environmentName }}
+      displayName: Generate Terraform Destroy Plan (${{ environmentName }})
+      steps:
+      - task: DownloadPipelineArtifact@2
+        displayName: Download Terraform Manifests
+        inputs:
+          buildType: 'current'
+          artifactName: 'Terraform-manifests-out'
+          targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
 
-    - task: DownloadSecureFile@1
-      displayName: Download SSH Public Key
-      name: sshkey
-      inputs:
-        secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
+      - task: DownloadSecureFile@1
+        displayName: Download SSH Public Key
+        name: sshkey
+        inputs:
+          secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
 
-    - script: |
-        mkdir -p "$(Pipeline.Workspace)/secure-files"
-        cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
-      displayName: Stage SSH Public Key
+      - script: |
+          mkdir -p "$(Pipeline.Workspace)/secure-files"
+          cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
+        displayName: Stage SSH Public Key
 
-    - task: TerraformInstaller@1
-      displayName: Install Terraform
-      inputs:
-        terraformVersion: 'latest'
+      - task: TerraformInstaller@1
+        displayName: Install Terraform
+        inputs:
+          terraformVersion: 'latest'
 
-    - task: TerraformTask@5
-      displayName: Terraform Init
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
+      - task: TerraformTask@5
+        displayName: Terraform Init
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+          backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
+          backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
+          backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
+          backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
+          backendAzureRmKey: 'aks-${{ environmentName }}.tfstate'
+
+      - task: TerraformTask@5
+        displayName: Terraform Plan Destroy
+        inputs:
+          provider: 'azurerm'
+          command: 'plan'
+          workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+          commandOptions: '-destroy -var ssh_public_key=$(SSH_PUBLIC_KEY_FILE) -var environment=${{ environmentName }} -out $(TERRAFORM_MANIFESTS_WORK_DIR)/${{ environmentName }}-destroy-$(Build.BuildId).tfplan'
+          environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
+
+      - script: |
+          mkdir -p "$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}"
+          terraform show -no-color "$(TERRAFORM_MANIFESTS_WORK_DIR)/${{ environmentName }}-destroy-$(Build.BuildId).tfplan" > "$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}/${{ environmentName }}-destroy-$(Build.BuildId).txt"
+          cp "$(TERRAFORM_MANIFESTS_WORK_DIR)/${{ environmentName }}-destroy-$(Build.BuildId).tfplan" "$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}/${{ environmentName }}-destroy-$(Build.BuildId).tfplan"
+        displayName: Prepare Destroy Plan Bundle
         workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
-        backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
-        backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
-        backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
-        backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
-        backendAzureRmKey: 'aks-${{ parameters.targetEnvironment }}.tfstate'
 
-    - task: TerraformTask@5
-      displayName: Terraform Plan Destroy
-      inputs:
-        provider: 'azurerm'
-        command: 'plan'
-        workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
-        commandOptions: '-destroy -var ssh_public_key=$(SSH_PUBLIC_KEY_FILE) -var environment=${{ parameters.targetEnvironment }} -out $(TERRAFORM_MANIFESTS_WORK_DIR)/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).tfplan'
-        environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
+      - task: PublishPipelineArtifact@1
+        displayName: Publish Destroy Plan Bundle
+        inputs:
+          targetPath: '$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}'
+          artifact: '${{ environmentName }}-destroy-plan'
+          publishLocation: 'pipeline'
 
-    - script: |
-        mkdir -p "$(Pipeline.Workspace)/destroy-plan-bundle"
-        terraform show -no-color "$(TERRAFORM_MANIFESTS_WORK_DIR)/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).tfplan" > "$(Pipeline.Workspace)/destroy-plan-bundle/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).txt"
-        cp "$(TERRAFORM_MANIFESTS_WORK_DIR)/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).tfplan" "$(Pipeline.Workspace)/destroy-plan-bundle/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).tfplan"
-      displayName: Prepare Destroy Plan Bundle
-      workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+  - stage: TerraformDestroy_${{ environmentName }}
+    displayName: Destroy AKS Cluster (${{ environmentName }})
+    dependsOn: TerraformDestroyPlan_${{ environmentName }}
+    jobs:
+    - deployment: DestroyAKSCluster_${{ environmentName }}
+      displayName: Destroy ${{ environmentName }} AKS Cluster
+      environment: '${{ environmentName }}'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: DownloadPipelineArtifact@2
+              displayName: Download Terraform Manifests
+              inputs:
+                buildType: 'current'
+                artifactName: 'Terraform-manifests-out'
+                targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
 
-    - task: PublishPipelineArtifact@1
-      displayName: Publish Destroy Plan Bundle
-      inputs:
-        targetPath: '$(Pipeline.Workspace)/destroy-plan-bundle'
-        artifact: '${{ parameters.targetEnvironment }}-destroy-plan'
-        publishLocation: 'pipeline'
+            - task: DownloadPipelineArtifact@2
+              displayName: Download Reviewed Destroy Plan
+              inputs:
+                buildType: 'current'
+                artifactName: '${{ environmentName }}-destroy-plan'
+                targetPath: '$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}'
 
-- stage: TerraformDestroy
-  displayName: Destroy AKS Cluster (${{ parameters.targetEnvironment }})
-  dependsOn: TerraformDestroyPlan
-  jobs:
-  - deployment: DestroyAKSCluster
-    displayName: Destroy ${{ parameters.targetEnvironment }} AKS Cluster
-    environment: '${{ parameters.targetEnvironment }}'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: DownloadPipelineArtifact@2
-            displayName: Download Terraform Manifests
-            inputs:
-              buildType: 'current'
-              artifactName: 'Terraform-manifests-out'
-              targetPath: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+            - task: DownloadSecureFile@1
+              displayName: Download SSH Public Key
+              name: sshkey
+              inputs:
+                secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
 
-          - task: DownloadPipelineArtifact@2
-            displayName: Download Reviewed Destroy Plan
-            inputs:
-              buildType: 'current'
-              artifactName: '${{ parameters.targetEnvironment }}-destroy-plan'
-              targetPath: '$(Pipeline.Workspace)/destroy-plan-bundle'
+            - script: |
+                mkdir -p "$(Pipeline.Workspace)/secure-files"
+                cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
+              displayName: Stage SSH Public Key
 
-          - task: DownloadSecureFile@1
-            displayName: Download SSH Public Key
-            name: sshkey
-            inputs:
-              secureFile: 'aks-terraform-devops-ssh-key-ubuntu.pub'
+            - task: TerraformInstaller@1
+              displayName: Install Terraform
+              inputs:
+                terraformVersion: 'latest'
 
-          - script: |
-              mkdir -p "$(Pipeline.Workspace)/secure-files"
-              cp "$(sshkey.secureFilePath)" "$(SSH_PUBLIC_KEY_FILE)"
-            displayName: Stage SSH Public Key
+            - task: TerraformTask@5
+              displayName: Terraform Init
+              inputs:
+                provider: 'azurerm'
+                command: 'init'
+                workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+                backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
+                backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
+                backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
+                backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
+                backendAzureRmKey: 'aks-${{ environmentName }}.tfstate'
 
-          - task: TerraformInstaller@1
-            displayName: Install Terraform
-            inputs:
-              terraformVersion: 'latest'
-
-          - task: TerraformTask@5
-            displayName: Terraform Init
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
-              backendServiceArm: '$(TERRAFORM_SERVICE_CONNECTION)'
-              backendAzureRmResourceGroupName: '$(TERRAFORM_STATE_RESOURCE_GROUP)'
-              backendAzureRmStorageAccountName: '$(TERRAFORM_STATE_STORAGE_ACCOUNT)'
-              backendAzureRmContainerName: '$(TERRAFORM_STATE_CONTAINER)'
-              backendAzureRmKey: 'aks-${{ parameters.targetEnvironment }}.tfstate'
-
-          - task: TerraformTask@5
-            displayName: Terraform Apply Destroy Plan
-            inputs:
-              provider: 'azurerm'
-              command: 'apply'
-              workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
-              commandOptions: '$(Pipeline.Workspace)/destroy-plan-bundle/${{ parameters.targetEnvironment }}-destroy-$(Build.BuildId).tfplan'
-              environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
+            - task: TerraformTask@5
+              displayName: Terraform Apply Destroy Plan
+              inputs:
+                provider: 'azurerm'
+                command: 'apply'
+                workingDirectory: '$(TERRAFORM_MANIFESTS_WORK_DIR)'
+                commandOptions: '$(Pipeline.Workspace)/destroy-plan-bundle-${{ environmentName }}/${{ environmentName }}-destroy-$(Build.BuildId).tfplan'
+                environmentServiceNameAzureRM: '$(TERRAFORM_SERVICE_CONNECTION)'
