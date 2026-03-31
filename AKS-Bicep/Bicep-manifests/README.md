@@ -56,15 +56,15 @@ That is the Bicep equivalent of how the Terraform project creates both the resou
 
 The naming style intentionally mirrors the Terraform project.
 
-Examples for `dev` in `westus2` with organization `vp`:
+Examples for `dev` in `westus2` with the current shared parameter file value `organizationName = bicep`:
 
-- resource group: `rg-vp-aks-dev-westus2`
-- AKS cluster: `aks-vp-dev-westus2`
-- node resource group: `rg-vp-aks-dev-westus2-nodes`
-- Log Analytics workspace: `log-vp-aks-dev-westus2`
-- virtual network: `vnet-vp-aks-dev-westus2`
-- system subnet: `snet-vp-aks-dev-westus2-system`
-- Entra admin group: `grp-aksadmin-aks-vp-dev-westus2`
+- resource group: `rg-bicep-aks-dev-westus2`
+- AKS cluster: `aks-bicep-dev-westus2`
+- node resource group: `rg-bicep-aks-dev-westus2-nodes`
+- Log Analytics workspace: `log-bicep-aks-dev-westus2`
+- virtual network: `vnet-bicep-aks-dev-westus2`
+- system subnet: `snet-bicep-aks-dev-westus2-system`
+- Entra admin group: `grp-aksadmin-aks-bicep-dev-westus2`
 
 ## Parameters that matter most
 

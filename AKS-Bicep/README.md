@@ -116,13 +116,15 @@ File:
 Flow:
 
 1. Validate the Bicep files.
-2. Generate a bootstrap `what-if` for the resource group and Entra admin group.
-3. Generate a platform `what-if` for the AKS resources by using a temporary preview GUID for the admin group object ID.
-4. Publish the review JSON files and resolved resource names as artifacts.
-5. Wait for approval on `dev`, `qa`, or `prod`.
-6. Create or update the Entra admin group through the bootstrap deployment.
-7. Deploy the AKS platform using the real admin group object ID.
-8. Publish deployment outputs.
+2. Generate a filtered bootstrap parameter file for the resource group and Entra admin group template.
+3. Generate a filtered platform parameter file for the AKS template.
+4. Generate a bootstrap `what-if` for the resource group and Entra admin group.
+5. Generate a platform `what-if` for the AKS resources by using a temporary preview GUID for the admin group object ID.
+6. Publish the review JSON files and resolved resource names as artifacts.
+7. Wait for approval on `dev`, `qa`, or `prod`.
+8. Create or update the Entra admin group through the bootstrap deployment.
+9. Deploy the AKS platform using the real admin group object ID.
+10. Publish deployment outputs.
 
 ### Destroy pipeline
 
@@ -223,6 +225,8 @@ Then review:
 
 - `effective-config.json`
 - `resolved-values.json`
+- `bootstrap.resolved.parameters.json`
+- `platform.resolved.parameters.json`
 - `graph-group.json`
 - `<environment>-review.txt`
 - `<environment>-bootstrap-what-if.json`
@@ -267,12 +271,17 @@ az bicep build --file AKS-Bicep/Bicep-manifests/main.bicep
 ### Bootstrap what-if for dev
 
 ```powershell
+$bootstrapParams = Join-Path $env:TEMP 'aks-bicep-bootstrap.parameters.json'
+powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/New-AksBicepResolvedParameterFile.ps1 `
+  -TemplateFile AKS-Bicep/Bicep-manifests/bootstrap-admin-group.bicep `
+  -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  -OutputFile $bootstrapParams
+
 az deployment sub what-if `
   --name aks-bicep-dev-bootstrap-local `
   --location westus2 `
   --template-file AKS-Bicep/Bicep-manifests/bootstrap-admin-group.bicep `
-  --parameters @AKS-Bicep/Bicep-manifests/shared.parameters.json `
-               @AKS-Bicep/Bicep-manifests/environments/dev.parameters.json
+  --parameters "@$bootstrapParams"
 ```
 
 ### Platform what-if for dev
@@ -280,16 +289,20 @@ az deployment sub what-if `
 ```powershell
 $sshKey = (Get-Content -Raw AKS-Terraform/aks-prod-sshkeys-terraform/aksprodsshkey.pub).Trim()
 $previewGroupId = [guid]::NewGuid().Guid
+$platformParams = Join-Path $env:TEMP 'aks-bicep-platform.parameters.json'
+powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/New-AksBicepResolvedParameterFile.ps1 `
+  -TemplateFile AKS-Bicep/Bicep-manifests/main.bicep `
+  -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  -OutputFile $platformParams
 
 az deployment sub what-if `
   --name aks-bicep-dev-platform-local `
   --location westus2 `
   --template-file AKS-Bicep/Bicep-manifests/main.bicep `
-  --parameters @AKS-Bicep/Bicep-manifests/shared.parameters.json `
-               @AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  --parameters "@$platformParams" `
   --parameters aksAdminGroupObjectId=$previewGroupId `
-               aksAdminGroupDisplayName=grp-aksadmin-aks-vp-dev-westus2 `
-               aksAdminGroupUniqueName=grp-aksadmin-aks-vp-dev-westus2 `
+               aksAdminGroupDisplayName=grp-aksadmin-aks-bicep-dev-westus2 `
+               aksAdminGroupUniqueName=grp-aksadmin-aks-bicep-dev-westus2 `
                sshPublicKeyData="$sshKey"
 ```
 
@@ -298,12 +311,17 @@ az deployment sub what-if `
 First bootstrap the Entra group and capture its outputs:
 
 ```powershell
+$bootstrapParams = Join-Path $env:TEMP 'aks-bicep-bootstrap.parameters.json'
+powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/New-AksBicepResolvedParameterFile.ps1 `
+  -TemplateFile AKS-Bicep/Bicep-manifests/bootstrap-admin-group.bicep `
+  -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  -OutputFile $bootstrapParams
+
 $bootstrap = az deployment sub create `
   --name aks-bicep-dev-bootstrap-local `
   --location westus2 `
   --template-file AKS-Bicep/Bicep-manifests/bootstrap-admin-group.bicep `
-  --parameters @AKS-Bicep/Bicep-manifests/shared.parameters.json `
-               @AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  --parameters "@$bootstrapParams" `
   --query properties.outputs `
   --output json | ConvertFrom-Json
 ```
@@ -312,13 +330,17 @@ Then deploy the AKS platform with the real group object ID:
 
 ```powershell
 $sshKey = (Get-Content -Raw AKS-Terraform/aks-prod-sshkeys-terraform/aksprodsshkey.pub).Trim()
+$platformParams = Join-Path $env:TEMP 'aks-bicep-platform.parameters.json'
+powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/New-AksBicepResolvedParameterFile.ps1 `
+  -TemplateFile AKS-Bicep/Bicep-manifests/main.bicep `
+  -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  -OutputFile $platformParams
 
 az deployment sub create `
   --name aks-bicep-dev-platform-local `
   --location westus2 `
   --template-file AKS-Bicep/Bicep-manifests/main.bicep `
-  --parameters @AKS-Bicep/Bicep-manifests/shared.parameters.json `
-               @AKS-Bicep/Bicep-manifests/environments/dev.parameters.json `
+  --parameters "@$platformParams" `
   --parameters aksAdminGroupObjectId=$bootstrap.aksAdminGroupObjectId.value `
                aksAdminGroupDisplayName=$bootstrap.aksAdminGroupDisplayName.value `
                aksAdminGroupUniqueName=$bootstrap.aksAdminGroupUniqueName.value `
@@ -328,8 +350,8 @@ az deployment sub create `
 ### Destroy dev
 
 ```powershell
-az group delete --name rg-vp-aks-dev-westus2 --yes
-az rest --method delete --url "https://graph.microsoft.com/v1.0/groups(uniqueName='grp-aksadmin-aks-vp-dev-westus2')"
+az group delete --name rg-bicep-aks-dev-westus2 --yes
+az rest --method delete --url "https://graph.microsoft.com/v1.0/groups(uniqueName='grp-aksadmin-aks-bicep-dev-westus2')"
 ```
 
 ## Common beginner questions

@@ -6,6 +6,7 @@ This folder contains helper scripts used by the Bicep learning workflow.
 
 - `Resolve-AksBicepNames.ps1`
 - `Get-AksBicepDeploymentConfig.ps1`
+- `New-AksBicepResolvedParameterFile.ps1`
 
 ## What it does
 
@@ -33,6 +34,14 @@ The precedence is:
 
 So if a value exists in a parameter file, changing only the template default will not affect the pipeline run.
 
+`New-AksBicepResolvedParameterFile.ps1` builds a template-specific deployment parameter file by:
+
+- reading the parameters supported by the target Bicep entry template
+- merging the shared and environment parameter files in Azure CLI order
+- removing parameters that do not belong to that specific template
+
+This is what keeps the create pipeline from failing when one shared parameter is valid for `main.bicep` but not for `bootstrap-admin-group.bicep`, or the other way around.
+
 ## Why the pipelines use it
 
 The destroy pipeline needs a reliable way to know what to inspect and delete before it starts removing resources.
@@ -54,4 +63,8 @@ powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/Resolve-AksBicepNames.ps1 
 
 ```powershell
 powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/Get-AksBicepDeploymentConfig.ps1 -BootstrapTemplateFile AKS-Bicep/Bicep-manifests/bootstrap-admin-group.bicep -MainTemplateFile AKS-Bicep/Bicep-manifests/main.bicep -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json
+```
+
+```powershell
+powershell -NoLogo -NoProfile -File AKS-Bicep/scripts/New-AksBicepResolvedParameterFile.ps1 -TemplateFile AKS-Bicep/Bicep-manifests/main.bicep -ParameterFiles AKS-Bicep/Bicep-manifests/shared.parameters.json,AKS-Bicep/Bicep-manifests/environments/dev.parameters.json -OutputFile $env:TEMP\aks-bicep-main.parameters.json
 ```

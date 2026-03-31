@@ -106,8 +106,21 @@ stages:
             New-Item -ItemType Directory -Force -Path $reviewDir | Out-Null
             $sharedParameterFilePath = "$(BICEP_MANIFESTS_WORK_DIR)/shared.parameters.json"
             $environmentParameterFilePath = "$(BICEP_MANIFESTS_WORK_DIR)/environments/${{ environmentName }}.parameters.json"
-            $sharedParameterFile = "@$sharedParameterFilePath"
-            $environmentParameterFile = "@$environmentParameterFilePath"
+            $bootstrapParameterFilePath = Join-Path $reviewDir 'bootstrap.resolved.parameters.json'
+            $platformParameterFilePath = Join-Path $reviewDir 'platform.resolved.parameters.json'
+
+            & "$(BICEP_SCRIPTS_WORK_DIR)/New-AksBicepResolvedParameterFile.ps1" `
+              -TemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
+              -ParameterFiles @($sharedParameterFilePath, $environmentParameterFilePath) `
+              -OutputFile $bootstrapParameterFilePath
+
+            & "$(BICEP_SCRIPTS_WORK_DIR)/New-AksBicepResolvedParameterFile.ps1" `
+              -TemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/main.bicep" `
+              -ParameterFiles @($sharedParameterFilePath, $environmentParameterFilePath) `
+              -OutputFile $platformParameterFilePath
+
+            $bootstrapParameterFile = "@$bootstrapParameterFilePath"
+            $platformParameterFile = "@$platformParameterFilePath"
 
             $effectiveConfigJson = & "$(BICEP_SCRIPTS_WORK_DIR)/Get-AksBicepDeploymentConfig.ps1" `
               -BootstrapTemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
@@ -133,7 +146,7 @@ stages:
               --name "aks-bicep-${{ environmentName }}-bootstrap-whatif-$(Build.BuildId)" `
               --location "$($effectiveConfig.location)" `
               --template-file "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
-              --parameters $sharedParameterFile $environmentParameterFile `
+              --parameters $bootstrapParameterFile `
               --result-format FullResourcePayloads `
               --output json > $bootstrapWhatIfPath
 
@@ -155,7 +168,7 @@ stages:
               --name "aks-bicep-${{ environmentName }}-platform-whatif-$(Build.BuildId)" `
               --location "$($effectiveConfig.location)" `
               --template-file "$(BICEP_MANIFESTS_WORK_DIR)/main.bicep" `
-              --parameters $sharedParameterFile $environmentParameterFile `
+              --parameters $platformParameterFile `
               --parameters aksAdminGroupObjectId="$aksAdminGroupObjectId" `
                            aksAdminGroupDisplayName="$aksAdminGroupDisplayName" `
                            aksAdminGroupUniqueName="$aksAdminGroupUniqueName" `
@@ -178,6 +191,8 @@ stages:
             AKS admin UPN source value: $($effectiveConfig.aksAdminUserPrincipalName)
             Shared parameter file: $sharedParameterFilePath
             Environment parameter file: $environmentParameterFilePath
+            Bootstrap parameter file used: $bootstrapParameterFilePath
+            Platform parameter file used: $platformParameterFilePath
             Bootstrap what-if output: $bootstrapWhatIfPath
             Platform what-if output: $platformWhatIfPath
             Admin group object ID source for preview: $adminGroupIdSource
@@ -241,8 +256,6 @@ stages:
 
                   $sharedParameterFilePath = "$(BICEP_MANIFESTS_WORK_DIR)/shared.parameters.json"
                   $environmentParameterFilePath = "$(BICEP_MANIFESTS_WORK_DIR)/environments/${{ environmentName }}.parameters.json"
-                  $sharedParameterFile = "@$sharedParameterFilePath"
-                  $environmentParameterFile = "@$environmentParameterFilePath"
                   $effectiveConfig = (& "$(BICEP_SCRIPTS_WORK_DIR)/Get-AksBicepDeploymentConfig.ps1" `
                     -BootstrapTemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
                     -MainTemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/main.bicep" `
@@ -252,13 +265,28 @@ stages:
                   $deploymentName = "aks-bicep-${{ environmentName }}-create-$(Build.BuildId)"
                   $outputDir = "$(Pipeline.Workspace)/deployment-output-${{ environmentName }}"
                   New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+                  $bootstrapParameterFilePath = Join-Path $outputDir 'bootstrap.resolved.parameters.json'
+                  $platformParameterFilePath = Join-Path $outputDir 'platform.resolved.parameters.json'
+
+                  & "$(BICEP_SCRIPTS_WORK_DIR)/New-AksBicepResolvedParameterFile.ps1" `
+                    -TemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
+                    -ParameterFiles @($sharedParameterFilePath, $environmentParameterFilePath) `
+                    -OutputFile $bootstrapParameterFilePath
+
+                  & "$(BICEP_SCRIPTS_WORK_DIR)/New-AksBicepResolvedParameterFile.ps1" `
+                    -TemplateFile "$(BICEP_MANIFESTS_WORK_DIR)/main.bicep" `
+                    -ParameterFiles @($sharedParameterFilePath, $environmentParameterFilePath) `
+                    -OutputFile $platformParameterFilePath
+
+                  $bootstrapParameterFile = "@$bootstrapParameterFilePath"
+                  $platformParameterFile = "@$platformParameterFilePath"
 
                   $bootstrapOutputsPath = Join-Path $outputDir 'bootstrap-outputs.json'
                   az deployment sub create `
                     --name "$deploymentName-bootstrap" `
                     --location "$($effectiveConfig.location)" `
                     --template-file "$(BICEP_MANIFESTS_WORK_DIR)/bootstrap-admin-group.bicep" `
-                    --parameters $sharedParameterFile $environmentParameterFile `
+                    --parameters $bootstrapParameterFile `
                     --query properties.outputs `
                     --output json > $bootstrapOutputsPath
 
@@ -271,7 +299,7 @@ stages:
                     --name "$deploymentName-platform" `
                     --location "$($effectiveConfig.location)" `
                     --template-file "$(BICEP_MANIFESTS_WORK_DIR)/main.bicep" `
-                    --parameters $sharedParameterFile $environmentParameterFile `
+                    --parameters $platformParameterFile `
                     --parameters aksAdminGroupObjectId="$aksAdminGroupObjectId" `
                                  aksAdminGroupDisplayName="$aksAdminGroupDisplayName" `
                                  aksAdminGroupUniqueName="$aksAdminGroupUniqueName" `
