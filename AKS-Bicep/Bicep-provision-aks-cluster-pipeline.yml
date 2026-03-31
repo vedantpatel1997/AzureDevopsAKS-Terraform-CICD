@@ -153,15 +153,13 @@ stages:
             $aksAdminGroupObjectId = [guid]::NewGuid().Guid
             $aksAdminGroupDisplayName = $resolved.clusterAdminGroupUniqueName
             $aksAdminGroupUniqueName = $resolved.clusterAdminGroupUniqueName
-            @"
-            {
-              "status": "preview-only",
-              "previewObjectId": "$aksAdminGroupObjectId",
-              "displayName": "$aksAdminGroupDisplayName",
-              "uniqueName": "$aksAdminGroupUniqueName",
-              "note": "Create what-if intentionally uses a temporary GUID so preview does not depend on Microsoft Graph lookup permissions."
-            }
-            "@ | Set-Content -LiteralPath (Join-Path $reviewDir 'graph-group.json') -Encoding utf8
+            [ordered]@{
+              status = 'preview-only'
+              previewObjectId = $aksAdminGroupObjectId
+              displayName = $aksAdminGroupDisplayName
+              uniqueName = $aksAdminGroupUniqueName
+              note = 'Create what-if intentionally uses a temporary GUID so preview does not depend on Microsoft Graph lookup permissions.'
+            } | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $reviewDir 'graph-group.json') -Encoding utf8
             $adminGroupIdSource = 'preview-placeholder-guid'
 
             az deployment sub what-if `
@@ -176,32 +174,34 @@ stages:
               --result-format FullResourcePayloads `
               --output json > $platformWhatIfPath
 
-            @"
-            Environment: ${{ environmentName }}
-            Review type: Bicep bootstrap + platform what-if
-            Deployment location: $($effectiveConfig.location)
-            Resource group: $($resolved.resourceGroupName)
-            AKS cluster: $($resolved.clusterName)
-            Node resource group: $($resolved.nodeResourceGroupName)
-            Log Analytics workspace: $($resolved.logAnalyticsWorkspaceName)
-            Virtual network: $($resolved.virtualNetworkName)
-            AKS admin group: $($resolved.clusterAdminGroupUniqueName)
-            Organization name source value: $($effectiveConfig.organizationName)
-            Kubernetes version source value: $($effectiveConfig.kubernetesVersion)
-            AKS admin UPN source value: $($effectiveConfig.aksAdminUserPrincipalName)
-            Shared parameter file: $sharedParameterFilePath
-            Environment parameter file: $environmentParameterFilePath
-            Bootstrap parameter file used: $bootstrapParameterFilePath
-            Platform parameter file used: $platformParameterFilePath
-            Bootstrap what-if output: $bootstrapWhatIfPath
-            Platform what-if output: $platformWhatIfPath
-            Admin group object ID source for preview: $adminGroupIdSource
-
-            Review both what-if JSON files before approving the deployment job.
-            Microsoft Graph extensible resources have limited what-if support, so the bootstrap what-if may not show the Entra group in full detail.
-            The platform what-if always uses a temporary GUID for preview so the review stage does not depend on Microsoft Graph lookup permissions.
-            The real deployment first creates or updates the Entra group and then deploys AKS with the real group object ID.
-            "@ | Set-Content -LiteralPath (Join-Path $reviewDir '${{ environmentName }}-review.txt') -Encoding utf8
+            (
+              @(
+                'Environment: ${{ environmentName }}'
+                'Review type: Bicep bootstrap + platform what-if'
+                "Deployment location: $($effectiveConfig.location)"
+                "Resource group: $($resolved.resourceGroupName)"
+                "AKS cluster: $($resolved.clusterName)"
+                "Node resource group: $($resolved.nodeResourceGroupName)"
+                "Log Analytics workspace: $($resolved.logAnalyticsWorkspaceName)"
+                "Virtual network: $($resolved.virtualNetworkName)"
+                "AKS admin group: $($resolved.clusterAdminGroupUniqueName)"
+                "Organization name source value: $($effectiveConfig.organizationName)"
+                "Kubernetes version source value: $($effectiveConfig.kubernetesVersion)"
+                "AKS admin UPN source value: $($effectiveConfig.aksAdminUserPrincipalName)"
+                "Shared parameter file: $sharedParameterFilePath"
+                "Environment parameter file: $environmentParameterFilePath"
+                "Bootstrap parameter file used: $bootstrapParameterFilePath"
+                "Platform parameter file used: $platformParameterFilePath"
+                "Bootstrap what-if output: $bootstrapWhatIfPath"
+                "Platform what-if output: $platformWhatIfPath"
+                "Admin group object ID source for preview: $adminGroupIdSource"
+                ''
+                'Review both what-if JSON files before approving the deployment job.'
+                'Microsoft Graph extensible resources have limited what-if support, so the bootstrap what-if may not show the Entra group in full detail.'
+                'The platform what-if always uses a temporary GUID for preview so the review stage does not depend on Microsoft Graph lookup permissions.'
+                'The real deployment first creates or updates the Entra group and then deploys AKS with the real group object ID.'
+              ) -join [Environment]::NewLine
+            ) | Set-Content -LiteralPath (Join-Path $reviewDir '${{ environmentName }}-review.txt') -Encoding utf8
 
       - task: PublishPipelineArtifact@1
         displayName: Publish Bicep Review Bundle
