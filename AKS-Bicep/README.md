@@ -22,18 +22,21 @@ It creates:
 - an optional Linux user node pool
 - an optional Windows user node pool
 
-Defaults intentionally match the Terraform sample where practical:
+The Bicep templates still keep Terraform-like fallback defaults in the `.bicep` files, but the active pipeline values come from the parameter files.
+
+Current pipeline-backed defaults in this repo:
 
 - location: `westus2`
-- organization name: `vp`
+- organization name: `bicep`
 - environments: `dev`, `qa`, `prod`
 - Kubernetes version: `1.34.3`
 - Linux and Windows user pools disabled by default
 
 Important:
 
-- if the Terraform version is already deployed with the same defaults, the Bicep version will target the same resource names
-- for a side-by-side test, change `organizationName` to something like `vpbicep`
+- the `.bicep` files still use `vp` as their fallback default so you can compare the naming logic with Terraform
+- pipeline runs use `Bicep-manifests/shared.parameters.json` first, so changing that file updates the deployed naming automatically
+- if the Terraform version is already deployed with the same naming inputs, the Bicep version will target the same resource names
 
 ## Folder structure
 
@@ -99,6 +102,7 @@ Configuration source of truth:
 - the pipelines no longer hard-code `organizationName`, `location`, `kubernetesVersion`, or `aksAdminUserPrincipalName`
 - shared values come from `Bicep-manifests/shared.parameters.json`
 - environment-specific values come from `Bicep-manifests/environments/<environment>.parameters.json`
+- parameter files override `.bicep` defaults
 - if you change those files, the pipeline will use the new values automatically
 
 ## Pipeline behavior
@@ -113,7 +117,7 @@ Flow:
 
 1. Validate the Bicep files.
 2. Generate a bootstrap `what-if` for the resource group and Entra admin group.
-3. Generate a platform `what-if` for the AKS resources.
+3. Generate a platform `what-if` for the AKS resources by using a temporary preview GUID for the admin group object ID.
 4. Publish the review JSON files and resolved resource names as artifacts.
 5. Wait for approval on `dev`, `qa`, or `prod`.
 6. Create or update the Entra admin group through the bootstrap deployment.
@@ -227,6 +231,7 @@ Then review:
 Important:
 
 - Microsoft Graph extensible resources have limited `what-if` support, so the bootstrap review may not fully enumerate the Entra group change
+- `graph-group.json` in the create review bundle is expected to show `preview-only` during `what-if`
 - the platform `what-if` still gives you the important AKS, network, and Log Analytics preview
 
 ### For destroy runs
@@ -369,6 +374,12 @@ The pipeline now resolves the effective values from:
 3. the Bicep defaults only if a value is not supplied in those files
 
 So if you change `organizationName` in `shared.parameters.json`, the pipeline will pick that up automatically.
+
+Important:
+
+- if `organizationName` is present in a parameter file, changing only the `.bicep` default will not change the pipeline behavior
+- that is intentional because the same shared parameter file feeds both `bootstrap-admin-group.bicep` and `main.bicep`, which keeps them aligned
+- if you want template defaults to drive the pipeline instead, remove that parameter from the parameter files and keep the defaults aligned in both templates
 
 ## Safe operating advice
 

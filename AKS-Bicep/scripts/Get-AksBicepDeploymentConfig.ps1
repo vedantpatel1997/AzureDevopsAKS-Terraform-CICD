@@ -90,7 +90,8 @@ function Resolve-EffectiveValue {
         [object[]]$ParameterDocuments
     )
 
-    foreach ($parameterDocument in $ParameterDocuments) {
+    for ($index = $ParameterDocuments.Count - 1; $index -ge 0; $index--) {
+        $parameterDocument = $ParameterDocuments[$index]
         $parameterValue = Get-ParameterFileValue -ParameterDocument $parameterDocument -Name $Name
         if ($null -ne $parameterValue) {
             return $parameterValue

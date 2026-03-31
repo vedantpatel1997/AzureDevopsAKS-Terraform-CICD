@@ -137,32 +137,19 @@ stages:
               --result-format FullResourcePayloads `
               --output json > $bootstrapWhatIfPath
 
-            $graphLookup = & az rest --method GET --url $resolved.graphGroupDeleteUrl --output json 2>&1
-            if ($LASTEXITCODE -eq 0) {
-              $graphGroup = $graphLookup | ConvertFrom-Json
-              $graphLookup | Set-Content -LiteralPath (Join-Path $reviewDir 'graph-group.json') -Encoding utf8
-              $aksAdminGroupObjectId = $graphGroup.id
-              $aksAdminGroupDisplayName = $graphGroup.displayName
-              $aksAdminGroupUniqueName = if ($graphGroup.PSObject.Properties.Name -contains 'uniqueName') { $graphGroup.uniqueName } else { $resolved.clusterAdminGroupUniqueName }
-              $adminGroupIdSource = 'existing-group-object-id'
+            $aksAdminGroupObjectId = [guid]::NewGuid().Guid
+            $aksAdminGroupDisplayName = $resolved.clusterAdminGroupUniqueName
+            $aksAdminGroupUniqueName = $resolved.clusterAdminGroupUniqueName
+            @"
+            {
+              "status": "preview-only",
+              "previewObjectId": "$aksAdminGroupObjectId",
+              "displayName": "$aksAdminGroupDisplayName",
+              "uniqueName": "$aksAdminGroupUniqueName",
+              "note": "Create what-if intentionally uses a temporary GUID so preview does not depend on Microsoft Graph lookup permissions."
             }
-            elseif ($graphLookup -match 'ResourceNotFound' -or $graphLookup -match 'Request_ResourceNotFound') {
-              $aksAdminGroupObjectId = [guid]::NewGuid().Guid
-              $aksAdminGroupDisplayName = $resolved.clusterAdminGroupUniqueName
-              $aksAdminGroupUniqueName = $resolved.clusterAdminGroupUniqueName
-              @"
-              {
-                "status": "not-found",
-                "previewObjectId": "$aksAdminGroupObjectId",
-                "displayName": "$aksAdminGroupDisplayName",
-                "uniqueName": "$aksAdminGroupUniqueName"
-              }
-              "@ | Set-Content -LiteralPath (Join-Path $reviewDir 'graph-group.json') -Encoding utf8
-              $adminGroupIdSource = 'preview-placeholder-guid'
-            }
-            else {
-              throw "Microsoft Graph lookup failed for $($resolved.clusterAdminGroupUniqueName). $graphLookup"
-            }
+            "@ | Set-Content -LiteralPath (Join-Path $reviewDir 'graph-group.json') -Encoding utf8
+            $adminGroupIdSource = 'preview-placeholder-guid'
 
             az deployment sub what-if `
               --name "aks-bicep-${{ environmentName }}-platform-whatif-$(Build.BuildId)" `
@@ -197,7 +184,7 @@ stages:
 
             Review both what-if JSON files before approving the deployment job.
             Microsoft Graph extensible resources have limited what-if support, so the bootstrap what-if may not show the Entra group in full detail.
-            If the Entra group does not exist yet, the platform what-if uses a temporary GUID only for preview.
+            The platform what-if always uses a temporary GUID for preview so the review stage does not depend on Microsoft Graph lookup permissions.
             The real deployment first creates or updates the Entra group and then deploys AKS with the real group object ID.
             "@ | Set-Content -LiteralPath (Join-Path $reviewDir '${{ environmentName }}-review.txt') -Encoding utf8
 

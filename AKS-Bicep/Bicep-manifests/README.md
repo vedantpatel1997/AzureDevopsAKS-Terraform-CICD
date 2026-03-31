@@ -92,8 +92,15 @@ For the Bicep workflow in this repo:
 - the parameter files are the source of truth for shared deployment values
 - the Azure DevOps pipelines read those effective values at runtime
 - the pipelines do not own `organizationName`, `location`, or `kubernetesVersion`
+- parameter files override the fallback defaults inside the `.bicep` templates
 
 That means if you change `shared.parameters.json` or an environment parameter file, the pipeline follows that change without needing a YAML edit.
+
+In the current repo state:
+
+- the `.bicep` template fallback for `organizationName` is `vp`
+- the active shared parameter file sets `organizationName` to `bicep`
+- pipeline runs therefore use `bicep` unless you change the parameter files
 
 ## Why the SSH key is data instead of a file path
 

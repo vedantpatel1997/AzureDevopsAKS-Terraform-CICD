@@ -25,6 +25,14 @@ This folder contains helper scripts used by the Bicep learning workflow.
 
 It is used so the pipelines follow the Bicep configuration instead of duplicating values in YAML.
 
+The precedence is:
+
+1. environment parameter file
+2. shared parameter file
+3. `.bicep` template defaults
+
+So if a value exists in a parameter file, changing only the template default will not affect the pipeline run.
+
 ## Why the pipelines use it
 
 The destroy pipeline needs a reliable way to know what to inspect and delete before it starts removing resources.
