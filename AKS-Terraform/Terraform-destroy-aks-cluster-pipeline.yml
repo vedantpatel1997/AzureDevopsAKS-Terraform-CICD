@@ -27,7 +27,7 @@ variables:
 - name: TERRAFORM_STATE_STORAGE_ACCOUNT
   value: 'strgterraformvp'
 - name: TERRAFORM_STATE_CONTAINER
-  value: 'tfstatefiles'
+  value: 'aks-tfstate'
 - name: SSH_PUBLIC_KEY_FILE
   value: '$(Pipeline.Workspace)/secure-files/aks-terraform-devops-ssh-key-ubuntu.pub'
 
